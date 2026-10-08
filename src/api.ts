@@ -25,7 +25,7 @@ export function buildApi(rooms: Rooms, runtime: Runtime) {
         })
         // what the frontend needs to know about this server
         .get('/info', () => ({
-          name: 'svnz-backend', protocol: 2,
+          name: 'svnz-backend', protocol: 3,
           characters: CHARACTERS, vsOnly: VS_ONLY, items: ITEM_TYPES, threat: THREAT,
           limits: { coop: config.maxCoopPlayers, vs: config.maxVsPlayers },
           reconnectGraceSeconds: config.reconnectGraceSeconds,
