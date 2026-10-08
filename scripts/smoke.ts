@@ -247,6 +247,23 @@ async function main() {
   vguests[0]!.send({ t: 'team', team: 1 });
   check((await vguests[0]!.wait('error')).code === 'invalid', 'there are no teams to choose');
 
+  console.log('Reclaim');
+  {
+    const rc = await room('coop');
+    const rh = await mk(rc.code, 'Hosty', rc.hostKey);
+    const rg = await mk(rc.code, 'Zed');
+    rg.c.send({ t: 'ready', ready: true });
+    await sleep(100);
+    rh.c.send({ t: 'start' });
+    await rg.c.wait('start');
+    const twin2 = new Client(); await twin2.ready();
+    twin2.send({ t: 'join', code: rc.code, name: 'zed' });
+    const tj = await twin2.wait('joined');
+    await sleep(150);
+    check(tj.claimed === true && tj.you === 1 && (rg.c.closed === 4009 || rg.c.has('replaced')), 'in a match, joining again with the same name takes the seat even if the old tab is still connected (it is replaced)');
+    for (const c of [rh.c, rg.c, twin2]) c.ws.terminate();
+  }
+
   console.log('Abuse');
   const spam = new Client(); await spam.ready();
   const closed = new Promise<number>((res) => spam.ws.on('close', (code) => res(code)));

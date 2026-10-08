@@ -102,7 +102,7 @@ export function attachWebSocket(server: HttpServer, rooms: Rooms): { close(): vo
     if (!rooms.lost(room, player, c.ws)) return;   // replaced by a newer connection of the same player
     broadcastRoom(room);
     if (room.status === 'playing' && player.id !== room.hostId) send(hostOf(room)?.ws, { t: 'peer', id: player.id, online: false });
-    log.debug(`room ${room.code}: ${player.name} lost the connection`);
+    log.info(`room ${room.code}: ${player.name} lost the connection`);
   }
 
   /** The player is gone for good (pressed leave, was kicked, or the grace ran out). */
@@ -130,6 +130,7 @@ export function attachWebSocket(server: HttpServer, rooms: Rooms): { close(): vo
       if (m.t === 'join') {
         const r = rooms.join(String(m.code), cleanName(String(m.name)), m.key as string | undefined, c.ws, c.ip);
         if (typeof r === 'string') { if (GUESSING.includes(r)) joinGuard.fail(c.ip); roomErr(c, r); return; }
+        if (r.replaced) { send(r.replaced, { t: 'replaced' }); r.replaced.close(4009, 'replaced'); }
         attach(c, r.room, r.player);
         send(c.ws, { t: 'joined', you: r.player.id, host: r.player.id === r.room.hostId, sid: r.sid, resumed: false, claimed: r.claimed, room: rooms.view(r.room) });
         if (r.claimed && r.room.status === 'playing') send(hostOf(r.room)?.ws, { t: 'peer', id: r.player.id, online: true });
