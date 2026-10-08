@@ -5,6 +5,7 @@ import express, { type Express, type RequestHandler } from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { config } from './config.js';
+import { IP_HEADER } from './api.js';
 import { accessOk, clientIp, originAllowed } from './security.js';
 
 /** Runs an Elysia app (Fetch API: Request -> Response) as an Express middleware. */
@@ -13,6 +14,7 @@ function elysiaBridge(app: { handle(r: Request): Promise<Response> | Response })
     try {
       const headers = new Headers();
       for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(', ') : v);
+      headers.set(IP_HEADER, clientIp(req, req.ip));   // set by us, never by the client
       const init: RequestInit = { method: req.method, headers };
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         headers.set('content-type', 'application/json');
