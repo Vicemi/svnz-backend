@@ -1,0 +1,75 @@
+// Express: the outer layer. Security headers, CORS, rate limits, real client IP, Cloudflare Access check, body size limit,
+// and the Elysia API mounted on top through a small Fetch <-> Express bridge.
+import cors from 'cors';
+import express, { type Express, type RequestHandler } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
+import { config } from './config.js';
+import { accessOk, clientIp, originAllowed } from './security.js';
+
+/** Runs an Elysia app (Fetch API: Request -> Response) as an Express middleware. */
+function elysiaBridge(app: { handle(r: Request): Promise<Response> | Response }): RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(', ') : v);
+      const init: RequestInit = { method: req.method, headers };
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        headers.set('content-type', 'application/json');
+        init.body = JSON.stringify(req.body ?? {});
+        headers.delete('content-length');
+      }
+      const url = `${req.protocol}://${req.get('host') ?? 'localhost'}${req.originalUrl}`;
+      const r = await app.handle(new Request(url, init));
+      res.status(r.status);
+      r.headers.forEach((v, k) => { if (k.toLowerCase() !== 'content-length') res.setHeader(k, v); });
+      res.send(Buffer.from(await r.arrayBuffer()));
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+
+export function buildHttp(api: { handle(r: Request): Promise<Response> | Response }): Express {
+  const app = express();
+  app.disable('x-powered-by');
+  const tp = config.trustProxy;
+  app.set('trust proxy', tp === 'true' ? true : tp === 'false' ? false : /^\d+$/.test(tp) ? Number(tp) : tp);
+
+  app.use(helmet());
+  app.use(cors({
+    origin: (origin, cb) => cb(null, config.allowedOrigins.includes('*') || originAllowed(origin ?? undefined)),
+    allowedHeaders: ['content-type', 'x-svnz-token', 'authorization'],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    maxAge: 600,
+  }));
+
+  const limiter = (limit: number) => rateLimit({
+    windowMs: 60_000, limit, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req, req.ip)),
+    message: { error: 'rate_limited' },
+  });
+  app.use(limiter(config.httpRatePerMinute));
+  app.post('/api/rooms', limiter(config.createRoomPerMinute));
+
+  // origin check for browsers (the token already guards the API; this stops other sites from using a leaked token)
+  app.use('/api', (req, res, next) => {
+    if (req.method !== 'OPTIONS' && !originAllowed(req.headers.origin)) { res.status(403).json({ error: 'forbidden_origin' }); return; }
+    next();
+  });
+  // Cloudflare Access (Zero Trust), only when it is configured as required
+  app.use(async (req, res, next) => {
+    if (config.cfAccessRequired && req.path !== '/health' && !(await accessOk(req.headers))) { res.status(401).json({ error: 'access_required' }); return; }
+    next();
+  });
+
+  app.use(express.json({ limit: '2kb' }));
+  app.use(['/api', '/health'], elysiaBridge(api));
+  app.use((_req, res) => { res.status(404).json({ error: 'not_found' }); });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  app.use(((err, _req, res, _next) => {
+    const bad = (err as { status?: number })?.status;
+    res.status(bad && bad < 500 ? bad : 500).json({ error: bad && bad < 500 ? 'bad_request' : 'server_error' });
+  }) as express.ErrorRequestHandler);
+  return app;
+}

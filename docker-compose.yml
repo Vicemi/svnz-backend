@@ -1,0 +1,9 @@
+# docker compose up -d --build   (reads ./.env). Put cloudflared in front of it, see README.
+services:
+  svnz-backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Behind a Cloudflare Tunnel running on the same machine publish the port only on localhost:
+    ports:
+      - "127.0.0.1:8787:8787"
