@@ -122,7 +122,7 @@ export class Rooms {
     return sid;
   }
 
-  join(code: string, name: string, key: string | undefined, ws: WebSocket, ip: string): { room: Room; player: Player; sid: string; claimed: boolean } | RoomError {
+  join(code: string, name: string, key: string | undefined, ws: WebSocket, ip: string): { room: Room; player: Player; sid: string; claimed: boolean; replaced?: WebSocket | null } | RoomError {
     const room = this.rooms.get(code);
     if (!room) return 'not_found';
     const ipHash = shaHex(ip);
@@ -131,13 +131,15 @@ export class Rooms {
     if (key !== undefined && !isHost && room.hostId === null) return 'bad_key';
     if (room.hostId === null && !isHost) return 'forbidden';   // the creator has to arrive first, with the key of the room
 
-    // someone whose connection dropped can take the seat back by joining again with the same nickname (also in the middle of a match)
+    // someone can take their seat back by joining again with the same nickname: when the connection dropped, or - in the middle of a match - even
+    // if the old connection still looks alive (a frozen tab, a second tab): the new one replaces it
     const lower = name.toLowerCase();
-    const seat = [...room.players.values()].find((p) => p.lostAt !== null && p.name.toLowerCase() === lower && p.id !== room.hostId);
+    const seat = [...room.players.values()].find((p) => p.name.toLowerCase() === lower && p.id !== room.hostId && (p.lostAt !== null || room.status === 'playing'));
     if (seat) {
+      const replaced = seat.ws && seat.ws !== ws ? seat.ws : null;
       seat.ws = ws; seat.lostAt = null; seat.ipHash = ipHash;
       room.lastActive = Date.now();
-      return { room, player: seat, sid: this.issue(seat), claimed: true };
+      return { room, player: seat, sid: this.issue(seat), claimed: true, replaced };
     }
 
     if (room.status !== 'lobby') return 'started';
@@ -151,7 +153,7 @@ export class Rooms {
     room.players.set(id, player);
     if (isHost) { room.hostId = id; player.ready = true; }
     room.lastActive = Date.now();
-    return { room, player, sid, claimed: false };
+    return { room, player, sid, claimed: false, replaced: null };
   }
 
   /** Comes back with the session id received when joining (a page reload, a reconnection). The old socket, if any, is replaced. */
