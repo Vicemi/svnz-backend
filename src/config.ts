@@ -34,6 +34,14 @@ for (const t of tokens) if (!/^[A-Za-z0-9._-]{16,128}$/.test(t)) throw new Error
 const adminToken = str('ADMIN_TOKEN', '');
 if (adminToken && !/^[A-Za-z0-9._-]{16,128}$/.test(adminToken)) throw new Error('ADMIN_TOKEN must be 16-128 characters of A-Z a-z 0-9 . _ -');
 
+function parseIce(raw: string): unknown[] {
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return v.slice(0, 8);
+  } catch { /* fall through */ }
+  throw new Error('ICE_SERVERS must be a JSON array such as [{"urls":"stun:stun.l.google.com:19302"}]');
+}
+
 export const config = {
   port: int('PORT', 8787, 1, 65535),
   host: str('HOST', '0.0.0.0'),
@@ -85,6 +93,8 @@ export const config = {
     bossHpPerPlayer: num('BOSS_HP_PER_PLAYER', 0.5, 0, 3),
     cap: num('DIFFICULTY_CAP', 2, 1, 10),
   },
+  /** STUN / TURN servers the browsers use to connect to each other directly (WebRTC). JSON array of RTCIceServer. Add a TURN server for players behind strict NATs. */
+  iceServers: parseIce(str('ICE_SERVERS', '[{"urls":"stun:stun.l.google.com:19302"},{"urls":"stun:stun.cloudflare.com:3478"}]')),
   logLevel: str('LOG_LEVEL', 'info'),
 };
 

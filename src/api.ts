@@ -25,10 +25,11 @@ export function buildApi(rooms: Rooms, runtime: Runtime) {
         })
         // what the frontend needs to know about this server
         .get('/info', () => ({
-          name: 'svnz-backend', protocol: 3,
+          name: 'svnz-backend', protocol: 4,
           characters: CHARACTERS, vsOnly: VS_ONLY, items: ITEM_TYPES, threat: THREAT,
           limits: { coop: config.maxCoopPlayers, vs: config.maxVsPlayers },
           reconnectGraceSeconds: config.reconnectGraceSeconds,
+          iceServers: config.iceServers,
           difficulty: config.difficulty,
         }))
         // create a room: returns its code (shown to the friends) and the key that proves who the host is

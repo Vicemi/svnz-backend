@@ -192,11 +192,24 @@ WebSocket: `wss://tu-servidor/ws`, con los sub-protocolos `svnz-v1` y `token.<GA
 | `{t:"char", char}` / `{t:"variant", v}` / `{t:"ready", ready}` | jugador | Personaje, color (0–3, único por personaje) y «listo». |
 | `{t:"settings", powerups, items, lives}` / `{t:"kick", id}` | anfitrión | Power-ups activados y vidas del VS / expulsar a un jugador. |
 | `{t:"mode", mode}` / `{t:"start"}` | anfitrión | Cambia el modo / empieza la partida. |
+| `{t:"rtc", to, d}` | todos | Señalización WebRTC (oferta / respuesta / ICE) entre el anfitrión y un invitado; el servidor solo la reenvía. |
 | `{t:"in", d}` | invitado | Estado de sus controles → llega solo al anfitrión. |
 | `{t:"snap", d}` | anfitrión | Estado del mundo → llega a los invitados. |
 | `{t:"end", d?}` | anfitrión | Termina la partida: todos vuelven al lobby. |
 
-El servidor responde con `joined`, `room` (estado del lobby), `start` (con la dificultad y los ajustes), `in`, `snap`, `ended`, `left`, `peer` (un invitado perdió o recuperó la conexión), `kicked`, `replaced`, `closed`, `error` y `pong`. `joined` trae el identificador de sesión (`sid`). Los mensajes del lobby se validan con TypeBox; de `in`/`snap` solo se mira el tamaño: el servidor nunca interpreta ni ejecuta su contenido.
+El servidor responde con `joined`, `room` (estado del lobby), `start` (con la dificultad y los ajustes), `in`, `snap`, `ended`, `left`, `peer` (un invitado perdió o recuperó la conexión), `rtc`, `kicked`, `replaced`, `closed`, `error` y `pong`. `joined` trae el identificador de sesión (`sid`). Los mensajes del lobby se validan con TypeBox; de `in`/`snap` solo se mira el tamaño: el servidor nunca interpreta ni ejecuta su contenido.
+
+## Latencia: conexión directa entre jugadores (WebRTC)
+
+El relé del servidor añade el viaje de ida y vuelta hasta el servidor a cada control y a cada imagen: si el servidor está lejos, el invitado sufre mucho retraso (con un servidor a ~190 ms de los jugadores, unos **380 ms** entre pulsar y ver, porque el control va invitado → servidor → anfitrión y el estado vuelve igual). Por eso, al empezar la partida, los navegadores intentan **conectarse directamente entre sí** (WebRTC, canales de datos) y el servidor solo hace de «presentador»: reenvía las ofertas, respuestas y candidatos ICE (`rtc`).
+
+- Con el enlace directo, los controles y el estado viajan sin pasar por el servidor (el estado a **60 por segundo** si todos los invitados tienen enlace directo; 30 por segundo por el relé) y el retraso baja al ping directo entre jugadores.
+- **Si no se puede (NAT estricto, red móvil) o se corta, todo sigue por el relé**, como antes, sin que el jugador haga nada. El juego muestra arriba `Ping 38ms P2P` o `Ping 190ms RELAY`.
+- `ICE_SERVERS` (JSON, ver `.env.example`): servidores STUN/TURN que se entregan a los navegadores. Por defecto, STUN públicos de Google y Cloudflare (gratis). Para que el enlace directo funcione también con redes estrictas hace falta un servidor **TURN** (por ejemplo [coturn](https://github.com/coturn/coturn) en tu VPS):
+  ```env
+  ICE_SERVERS=[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.tudominio.com:3478","username":"usuario","credential":"clave"}]
+  ```
+- La mejor forma de bajar el retraso del relé es **ubicar el servidor cerca de los jugadores** (la latencia es geografía, no CPU).
 
 ## Seguridad, en resumen
 

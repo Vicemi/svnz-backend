@@ -183,6 +183,13 @@ export function attachWebSocket(server: HttpServer, rooms: Rooms): { close(): vo
         log.info(`room ${room.code}: ${room.mode} started with ${room.players.size} players`);
         break;
       }
+      case 'rtc': {   // WebRTC signalling: only between the host and a guest of the same room
+        const target = room.players.get(Number(m.to));
+        if (!target || target.id === player.id || (!isHost && target.id !== room.hostId)) break;
+        if (JSON.stringify(m.d).length > 14000) break;
+        send(target.ws, { t: 'rtc', from: player.id, d: m.d });
+        break;
+      }
       case 'in': {   // guest -> host: the guest's controller state
         if (room.status !== 'playing' || isHost || room.hostId === null) break;
         send(hostOf(room)?.ws, { t: 'in', from: player.id, d: m.d });
