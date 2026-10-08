@@ -24,6 +24,7 @@ const ERROR_TEXT: Record<RoomError, string> = {
   bad_session: 'The session expired',
   banned: 'You were removed from this room',
   blocked: 'Too many failed attempts, try again later',
+  taken: 'That colour is already taken',
 };
 /** Failed lookups that count toward blocking an address (somebody guessing codes). */
 const GUESSING: RoomError[] = ['not_found', 'bad_key', 'forbidden', 'bad_session'];
@@ -151,6 +152,7 @@ export function attachWebSocket(server: HttpServer, rooms: Rooms): { close(): vo
 
     switch (m.t) {
       case 'char': { const e = rooms.setChar(room, player, m.char as CharKey); if (e) roomErr(c, e); else broadcastRoom(room); break; }
+      case 'variant': { const e = rooms.setVariant(room, player, Number(m.v)); if (e) roomErr(c, e); else broadcastRoom(room); break; }
       case 'ready': rooms.setReady(room, player, !!m.ready); broadcastRoom(room); break;
       case 'mode': { const e = rooms.setMode(room, player, m.mode as 'coop' | 'vs'); if (e) roomErr(c, e); else broadcastRoom(room); break; }
       case 'settings': {

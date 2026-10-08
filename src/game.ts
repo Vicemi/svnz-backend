@@ -22,6 +22,11 @@ export function cleanSettings(mode: 'coop' | 'vs', s: { powerups: boolean; items
   return { powerups: !!s.powerups, items, lives: Math.max(1, Math.min(3, Math.floor(s.lives))) };
 }
 
+/** How many colour variants each character has (the palettes of its sprite sheet, at most 4). Nobody else in the room can have the same one. */
+export const VARIANTS: Record<CharKey, number> = {
+  Mina: 4, GenericNinja: 4, DemonNinja: 3, GoldDemonNinja: 4, Bat: 4, BigDemon: 3, Dracula: 3, XaHero: 1, XaBoss: 1,
+};
+
 export const THREAT: Record<CharKey, number> = {
   XaHero: 0,
   XaBoss: 0,

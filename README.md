@@ -1,6 +1,6 @@
 # svnz-backend
 
-Servidor de **salas y retransmisión** para los modos online (**Coop de hasta 4** y **VS de hasta 4 contra 4**) de la versión web de *Super Vampire Ninja Zero*: [svnz-portweb](https://github.com/Vicemi/svnz-portweb) · [svnz-portweb.vicemi.dev](https://svnz-portweb.vicemi.dev).
+Servidor de **salas y retransmisión** para los modos online (**Coop de hasta 4** y **VS todos contra todos de hasta 4 jugadores**: 1v1, 1v1v1 o 1v1v1v1) de la versión web de *Super Vampire Ninja Zero*: [svnz-portweb](https://github.com/Vicemi/svnz-portweb) · [svnz-portweb.vicemi.dev](https://svnz-portweb.vicemi.dev).
 
 - **Express** es la capa de afuera: cabeceras de seguridad (helmet), CORS, límites de tasa, IP real detrás de Cloudflare, verificación opcional de Cloudflare Access y el servidor HTTP/WebSocket.
 - **Elysia** define la API HTTP con rutas y cuerpos validados (TypeBox); se monta dentro de Express. Los mensajes del WebSocket se validan con los mismos esquemas.
@@ -26,7 +26,7 @@ Comprobar que anda:
 
 ```sh
 curl http://localhost:8787/health          # {"ok":true,...}
-npm test                                   # prueba de punta a punta: salas, relé, límites, 4 contra 4
+npm test                                   # prueba de punta a punta: salas, relé, sesiones, límites, VS de 4
 ```
 
 Producción:
@@ -47,7 +47,7 @@ Todo se configura en el archivo `.env` (hay un modelo comentado en [`.env.exampl
 | :--- | :--- | :--- |
 | `PORT` | `8787` | Puerto en el que escucha. |
 | `HOST` | `0.0.0.0` | Dirección de escucha. Con un túnel de Cloudflare en la misma máquina podés usar `127.0.0.1`. |
-| `GAME_TOKEN` | *(obligatorio)* | Clave compartida con el juego (`PUBLIC_SVNZ_BACKEND_TOKEN`). 16–128 caracteres `A-Z a-z 0-9 . _ -`. `npm run token` genera una. |
+| `GAME_TOKEN` | *(obligatorio)* | Clave compartida con el juego (`PUBLIC_SVNZ_BACKEND_TOKEN`). 16–128 caracteres `A-Z a-z 0-9 . _ -`. `npm run token` genera una. Pueden ser **varios separados por coma** para rotar el token sin cortar el servicio. |
 | `ALLOWED_ORIGINS` | `*` | Sitios que pueden usar el servidor, separados por coma y sin `/` final. Poné ahí el dominio del juego. `*` solo para desarrollo. |
 | `TRUST_PROXY` | `1` | Cantidad de proxies delante del servidor (Express *trust proxy*). Con Cloudflare Tunnel: `1`. |
 | `TRUST_CLOUDFLARE` | `false` | `true` = la IP del visitante sale de `CF-Connecting-IP`. Activalo **solo** si todo el tráfico entra por Cloudflare. |
@@ -55,7 +55,13 @@ Todo se configura en el archivo `.env` (hay un modelo comentado en [`.env.exampl
 | `MAX_ROOMS` | `200` | Salas simultáneas. |
 | `ROOM_IDLE_MINUTES` | `30` | Una sala sin actividad se cierra. |
 | `MAX_COOP_PLAYERS` | `4` | Jugadores por sala coop (máx. 4). |
-| `MAX_VS_PLAYERS` | `8` | Jugadores por sala VS (8 = 4 contra 4). |
+| `MAX_VS_PLAYERS` | `4` | Jugadores por sala VS (todos contra todos, máx. 4). |
+| `MAX_ROOMS_PER_IP` | `3` | Salas abiertas a la vez por IP. |
+| `RECONNECT_GRACE_SECONDS` | `45` | Cuánto se guarda el asiento de quien perdió la conexión (recarga de la página, corte de red). Pasado ese tiempo se libera. |
+| `HOST_PLAY_GRACE_SECONDS` | `12` | Cuánto espera una partida a un anfitrión desconectado antes de terminarse para todos. |
+| `JOIN_FAIL_LIMIT` / `JOIN_BLOCK_MINUTES` | `12` / `5` | Intentos fallidos de entrar a una sala por minuto antes de bloquear la IP (evita adivinar códigos). |
+| `MAX_STRIKES` | `5` | Mensajes inválidos antes de cerrar el socket. |
+| `ADMIN_TOKEN` | vacío | Si se define, habilita `GET /api/admin/stats` (cabecera `x-admin-token`) con contadores sin datos personales. |
 | `MAX_CONNECTIONS_PER_IP` | `8` | WebSockets abiertos por IP. |
 | `HTTP_RATE_PER_MINUTE` | `60` | Pedidos HTTP por minuto y por IP. |
 | `CREATE_ROOM_PER_MINUTE` | `6` | Salas creadas por minuto y por IP. |
@@ -135,9 +141,13 @@ Si, en cambio, querés una instalación **privada** (solo tu grupo), activá Acc
 ## Reglas del juego que aplica el servidor
 
 - **Salas**: un código de 5 caracteres (`A-Z` sin `O/I/L` y `2-9`, aleatorio con `crypto`). Se crea con `POST /api/rooms`, que también devuelve una **clave de anfitrión** secreta; solo quien la tiene puede ser el anfitrión.
-- **Coop**: hasta 4 jugadores (`MAX_COOP_PLAYERS`). **VS**: hasta 8 (`MAX_VS_PLAYERS`), repartidos en dos equipos de máximo 4; cada jugador elige su equipo y se equilibran solos al entrar.
-- **Lobby**: cada jugador elige personaje y marca «listo»; el anfitrión puede cambiar el modo y empieza la partida cuando todos están listos (en VS, con jugadores en los dos equipos). No se puede entrar a una partida ya empezada.
-- Si el anfitrión se va, la sala se cierra. Si un invitado se va en plena partida, su personaje sale de la pelea.
+- **Coop**: hasta 4 jugadores (`MAX_COOP_PLAYERS`). **VS**: todos contra todos, hasta 4 (`MAX_VS_PLAYERS`); cada jugador es su propio equipo y empieza con 3 vidas (el anfitrión puede dejar 1 o 2).
+- **Lobby**: cada jugador elige personaje y color y marca «listo»; el anfitrión puede cambiar el modo y empieza la partida cuando todos están listos y conectados (el VS necesita al menos 2 jugadores). XA Hero y XA Boss solo se pueden elegir en VS.
+- **Colores**: hasta 4 variantes por personaje (las paletas de su hoja de sprites; XA solo tiene una). Si un jugador ya tiene un color de un personaje, ningún otro puede elegirlo (`taken`); al elegir un personaje se asigna el primer color libre.
+- **Power-ups**: el anfitrión los activa o desactiva y elige cuáles (`settings`): estrella, rayo, escudo, fuerza y colmillo, más el corazón (revive a un amigo caído) que **solo existe en coop**. En VS no se revive.
+- **Sesiones**: al entrar, cada jugador recibe un identificador de sesión secreto (solo se guarda su hash). Si se corta la conexión o se recarga la página, el asiento se conserva `RECONNECT_GRACE_SECONDS` y se vuelve con `resume`; también se puede volver **entrando de nuevo con el código de sala y el mismo apodo** mientras el asiento esté libre (incluso en plena partida). Los asientos que nadie reclama se liberan y las salas sin nadie se cierran: no quedan jugadores fantasma ni salas huérfanas.
+- Si el anfitrión recarga la página en plena partida, la partida (que vivía en esa página) se termina para todos y vuelven al lobby con sus asientos. Si se va para siempre, la sala se cierra. Si un invitado se va en plena partida, su personaje sale de la pelea.
+- **Expulsar**: el anfitrión puede sacar a un jugador del lobby; no puede volver a esa sala (se recuerda por dirección).
 
 ### Personajes y dificultad del coop
 
@@ -170,28 +180,31 @@ HTTP (todas salvo `/health` exigen el token en `x-svnz-token: <token>` o `Author
 | `GET /health` | Sonda de estado (pública). |
 | `GET /api/info` | Personajes, amenazas, límites y dificultad. |
 | `POST /api/rooms` `{ "mode": "coop" \| "vs" }` | Crea una sala: `{ code, hostKey, mode, max }`. |
-| `GET /api/rooms/:code` | Estado público de una sala (existe, modo, jugadores, si se puede entrar). |
+| `GET /api/rooms/:code` | Estado público de una sala (existe, modo, jugadores, si se puede entrar). Adivinar códigos bloquea la IP un rato. |
+| `GET /api/admin/stats` | Contadores (salas, jugadores, conexiones, memoria). Solo con `ADMIN_TOKEN` y la cabecera `x-admin-token`. |
 
 WebSocket: `wss://tu-servidor/ws`, con los sub-protocolos `svnz-v1` y `token.<GAME_TOKEN>` (el navegador no puede mandar cabeceras, por eso el token viaja ahí y no en la URL). Mensajes JSON; el primero debe ser `join` dentro de los 10 s.
 
 | Cliente → servidor | Quién | Efecto |
 | :--- | :--- | :--- |
 | `{t:"join", code, name, key?}` | todos | Entra a la sala (`key` = clave de anfitrión, solo del creador). |
-| `{t:"char", char}` / `{t:"team", team}` / `{t:"ready", ready}` | jugador | Personaje, equipo (VS) y «listo». |
+| `{t:"resume", code, sid}` | todos | Vuelve al asiento propio con el identificador de sesión (recarga, reconexión). |
+| `{t:"char", char}` / `{t:"variant", v}` / `{t:"ready", ready}` | jugador | Personaje, color (0–3, único por personaje) y «listo». |
+| `{t:"settings", powerups, items, lives}` / `{t:"kick", id}` | anfitrión | Power-ups activados y vidas del VS / expulsar a un jugador. |
 | `{t:"mode", mode}` / `{t:"start"}` | anfitrión | Cambia el modo / empieza la partida. |
 | `{t:"in", d}` | invitado | Estado de sus controles → llega solo al anfitrión. |
 | `{t:"snap", d}` | anfitrión | Estado del mundo → llega a los invitados. |
 | `{t:"end", d?}` | anfitrión | Termina la partida: todos vuelven al lobby. |
 
-El servidor responde con `joined`, `room` (estado del lobby), `start` (con la dificultad), `in`, `snap`, `ended`, `left`, `closed`, `error` y `pong`. Los mensajes del lobby se validan con TypeBox; de `in`/`snap` solo se mira el tamaño: el servidor nunca interpreta ni ejecuta su contenido.
+El servidor responde con `joined`, `room` (estado del lobby), `start` (con la dificultad y los ajustes), `in`, `snap`, `ended`, `left`, `peer` (un invitado perdió o recuperó la conexión), `kicked`, `replaced`, `closed`, `error` y `pong`. `joined` trae el identificador de sesión (`sid`). Los mensajes del lobby se validan con TypeBox; de `in`/`snap` solo se mira el tamaño: el servidor nunca interpreta ni ejecuta su contenido.
 
 ## Seguridad, en resumen
 
-Token comparado en tiempo constante · orígenes permitidos (HTTP y WebSocket) · límite de pedidos por IP · límite de salas creadas por IP · tope de salas y de conexiones por IP · tope de mensajes por segundo y de tamaño por conexión (se cierra el socket si se pasa) · todos los mensajes validados · apodos limpiados · acciones de anfitrión comprobadas en el servidor · `helmet` · cuerpo JSON de máx. 2 kB · sin estado en disco · IP real solo de `CF-Connecting-IP` cuando lo activás.
+Tokens comparados en tiempo constante y rotables · identificadores de sesión secretos (solo su hash en memoria) con asiento reservado y liberación automática · bloqueo de IP al adivinar códigos de sala · tope de salas por IP · controles validados (rango de bits) · cierre del socket tras varios mensajes inválidos · expulsión con veto por sala · aviso a los clientes al apagar el servidor · orígenes permitidos (HTTP y WebSocket) · límite de pedidos por IP · límite de salas creadas por IP · tope de salas y de conexiones por IP · tope de mensajes por segundo y de tamaño por conexión (se cierra el socket si se pasa) · todos los mensajes validados · apodos limpiados · acciones de anfitrión comprobadas en el servidor · `helmet` · cuerpo JSON de máx. 2 kB · sin estado en disco · IP real solo de `CF-Connecting-IP` cuando lo activás.
 
 ## Limitaciones conocidas
 
-- La pelea corre en el navegador del anfitrión: **tiene que mantener la pestaña visible** (si el navegador la suspende, la partida se congela y los invitados ven «se perdió la conexión» a los 12 s).
+- La pelea corre en el navegador del anfitrión: **tiene que mantener la pestaña visible** (si el navegador la suspende, la partida se congela y los invitados ven «se perdió la conexión» a los 12 s). Si el anfitrión recarga la página en plena partida, esa partida no se puede recuperar (el invitado sí puede recargar y volver).
 - Los invitados juegan con la latencia de ida y vuelta al anfitrión (se muestra el *ping* en el lobby); en VS el anfitrión tiene la ventaja de no tener retraso.
 - El anfitrión es quien manda: es un juego entre amigos, no hay protección contra un anfitrión tramposo.
 

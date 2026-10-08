@@ -7,7 +7,7 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import { config } from './config.js';
-import { CHARACTERS, VS_ONLY, cleanSettings, defaultSettings, difficultyOf, type CharKey, type Difficulty, type Settings } from './game.js';
+import { CHARACTERS, VARIANTS, VS_ONLY, cleanSettings, defaultSettings, difficultyOf, type CharKey, type Difficulty, type Settings } from './game.js';
 
 export type Mode = 'coop' | 'vs';
 export type Status = 'lobby' | 'playing';
@@ -15,6 +15,8 @@ export interface Player {
   id: number;
   name: string;
   char: CharKey;
+  /** colour variant of the character (unique among the players who picked the same character) */
+  variant: number;
   /** co-op: always 1; VS: every player is their own team (id + 1) */
   team: number;
   ready: boolean;
@@ -45,11 +47,11 @@ export interface RoomView {
   hostId: number | null;
   max: number;
   settings: Settings;
-  players: { id: number; name: string; char: CharKey; team: number; ready: boolean; host: boolean; online: boolean }[];
+  players: { id: number; name: string; char: CharKey; variant: number; team: number; ready: boolean; host: boolean; online: boolean }[];
   difficulty: Difficulty;
 }
 
-export type RoomError = 'not_found' | 'full' | 'started' | 'bad_key' | 'forbidden' | 'invalid' | 'limit' | 'bad_session' | 'banned' | 'blocked';
+export type RoomError = 'taken' | 'not_found' | 'full' | 'started' | 'bad_key' | 'forbidden' | 'invalid' | 'limit' | 'bad_session' | 'banned' | 'blocked';
 
 // No 0/O/1/I/L: easy to read out loud.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -99,9 +101,16 @@ export class Rooms {
     const players = [...room.players.values()].sort((a, b) => a.id - b.id);
     return {
       code: room.code, mode: room.mode, status: room.status, hostId: room.hostId, max: maxPlayers(room.mode), settings: room.settings,
-      players: players.map((p) => ({ id: p.id, name: p.name, char: p.char, team: p.team, ready: p.ready, host: p.id === room.hostId, online: p.lostAt === null })),
+      players: players.map((p) => ({ id: p.id, name: p.name, char: p.char, variant: p.variant, team: p.team, ready: p.ready, host: p.id === room.hostId, online: p.lostAt === null })),
       difficulty: difficultyOf(players.map((p) => p.char)),
     };
+  }
+
+  /** The first colour variant of `char` that no other player of the room is using (-1 = all taken). */
+  private freeVariant(room: Room, char: CharKey, except: number): number {
+    const used = new Set([...room.players.values()].filter((o) => o.id !== except && o.char === char).map((o) => o.variant));
+    for (let v = 0; v < VARIANTS[char]; v++) if (!used.has(v)) return v;
+    return -1;
   }
 
   private connected(p: Player): boolean { return p.lostAt === null && !!p.ws; }
@@ -136,8 +145,9 @@ export class Rooms {
     let id = 0;
     while (room.players.has(id)) id++;
     const team = room.mode === 'vs' ? id + 1 : 1;
-    const player: Player = { id, name, char: CHARACTERS[0], team, ready: false, ws, sidHash: Buffer.alloc(32), ipHash, lostAt: null };
+    const player: Player = { id, name, char: CHARACTERS[0], variant: 0, team, ready: false, ws, sidHash: Buffer.alloc(32), ipHash, lostAt: null };
     const sid = this.issue(player);
+    player.variant = Math.max(0, this.freeVariant(room, player.char, id));
     room.players.set(id, player);
     if (isHost) { room.hostId = id; player.ready = true; }
     room.lastActive = Date.now();
@@ -193,7 +203,20 @@ export class Rooms {
   setChar(room: Room, p: Player, char: CharKey): RoomError | null {
     if (room.status !== 'lobby') return 'started';
     if (room.mode === 'coop' && isVsOnly(char)) return 'invalid';
+    const v = this.freeVariant(room, char, p.id);
+    if (v < 0) return 'taken';   // every colour of that character is taken
     p.char = char;
+    p.variant = v;
+    if (p.id !== room.hostId) p.ready = false;
+    room.lastActive = Date.now();
+    return null;
+  }
+
+  setVariant(room: Room, p: Player, v: number): RoomError | null {
+    if (room.status !== 'lobby') return 'started';
+    if (v >= VARIANTS[p.char]) return 'invalid';
+    if ([...room.players.values()].some((o) => o.id !== p.id && o.char === p.char && o.variant === v)) return 'taken';
+    p.variant = v;
     if (p.id !== room.hostId) p.ready = false;
     room.lastActive = Date.now();
     return null;
@@ -211,7 +234,7 @@ export class Rooms {
     room.mode = mode;
     room.settings = defaultSettings(mode);
     for (const o of room.players.values()) {
-      if (mode === 'coop') { o.team = 1; if (isVsOnly(o.char)) o.char = CHARACTERS[0]; }
+      if (mode === 'coop') { o.team = 1; if (isVsOnly(o.char)) { o.char = CHARACTERS[0]; o.variant = Math.max(0, this.freeVariant(room, o.char, o.id)); } }
       else o.team = o.id + 1;
       if (o.id !== room.hostId) o.ready = false;
     }

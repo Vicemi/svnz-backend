@@ -20,6 +20,7 @@ export const ClientMessage = t.Union([
   t.Object({ t: t.Literal('settings'), powerups: t.Boolean(), items: t.Array(t.Union(ITEM_TYPES.map((i) => t.Literal(i))), { maxItems: 6 }), lives: t.Integer({ minimum: 1, maximum: 3 }) }),
   t.Object({ t: t.Literal('kick'), id: t.Integer({ minimum: 0, maximum: 7 }) }),
   t.Object({ t: t.Literal('char'), char: Char }),
+  t.Object({ t: t.Literal('variant'), v: t.Integer({ minimum: 0, maximum: 3 }) }),
   t.Object({ t: t.Literal('ready'), ready: t.Boolean() }),
   t.Object({ t: t.Literal('mode'), mode: Mode }),
   t.Object({ t: t.Literal('start') }),

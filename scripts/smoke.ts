@@ -96,6 +96,18 @@ async function main() {
   await host.wait('room'); await host.wait('room'); await host.wait('room');
   g1.send({ t: 'char', char: 'Hacker' });
   check((await g1.wait('error')).code === 'invalid', 'unknown character rejected');
+  host.inbox.length = 0;
+  g1.send({ t: 'char', char: 'Mina' });
+  const mv = await host.wait('room');
+  check(mv.room.players.find((p: any) => p.id === 1).variant === 1, 'a second Mina gets a free colour automatically (the first is taken)');
+  g1.send({ t: 'variant', v: 0 });
+  check((await g1.wait('error')).code === 'taken', 'a colour another player has cannot be chosen');
+  g1.send({ t: 'variant', v: 3 });
+  check((await host.wait('room', 2000, (m) => m.room.players.find((p: any) => p.id === 1).variant === 3)).room.players[1].variant === 3, 'a free colour can be chosen (up to 4 per character)');
+  g1.send({ t: 'char', char: 'Dracula' });
+  await host.wait('room', 2000, (m) => m.room.players.find((p: any) => p.id === 1).char === 'Dracula');
+  g1.send({ t: 'variant', v: 3 });
+  check((await g1.wait('error')).code === 'invalid', 'a character with 3 colours has no 4th');
   g1.send({ t: 'char', char: 'XaBoss' });
   check((await g1.wait('error')).code === 'invalid', 'the XA characters cannot be picked in co-op');
   g1.send({ t: 'start' });
