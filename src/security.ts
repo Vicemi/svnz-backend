@@ -6,13 +6,42 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { config } from './config.js';
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
-const TOKEN_HASH = digest(config.token);
+const TOKEN_HASHES = config.tokens.map(digest);
+const ADMIN_HASH = config.adminToken ? digest(config.adminToken) : null;
 
-/** Constant-time comparison of the shared game token. */
+/** Constant-time comparison of the shared game token (any of the accepted tokens). */
 export function tokenOk(candidate: string | undefined | null): boolean {
   if (!candidate) return false;
-  return timingSafeEqual(digest(candidate), TOKEN_HASH);
+  const h = digest(candidate);
+  let ok = false;
+  for (const t of TOKEN_HASHES) if (timingSafeEqual(h, t)) ok = true;   // no early exit: same time whichever token matches
+  return ok;
 }
+
+export function adminOk(candidate: string | undefined | null): boolean {
+  return !!ADMIN_HASH && !!candidate && timingSafeEqual(digest(candidate), ADMIN_HASH);
+}
+
+/** Counts failed room lookups / resumes per address and blocks the address for a while: room codes cannot be guessed by brute force. */
+export class JoinGuard {
+  private fails = new Map<string, { n: number; first: number; until: number }>();
+  blocked(ip: string): boolean {
+    const f = this.fails.get(ip);
+    return !!f && f.until > Date.now();
+  }
+  fail(ip: string): void {
+    const now = Date.now();
+    const f = this.fails.get(ip);
+    if (!f || now - f.first > 60_000) { this.fails.set(ip, { n: 1, first: now, until: 0 }); return; }
+    f.n++;
+    if (f.n >= config.joinFailLimit) f.until = now + config.joinBlockMinutes * 60_000;
+  }
+  sweep(): void {
+    const now = Date.now();
+    for (const [ip, f] of this.fails) if (f.until < now && now - f.first > 60_000) this.fails.delete(ip);
+  }
+}
+export const joinGuard = new JoinGuard();
 
 export function tokenFromHeaders(h: IncomingHttpHeaders): string | undefined {
   const x = h['x-svnz-token'];

@@ -2,10 +2,34 @@
 import { config } from './config.js';
 
 /** Playable characters of the web port (the keys of characters.xml). `threat` = how much stronger they make the enemies. */
-export const CHARACTERS = ['Mina', 'GenericNinja', 'DemonNinja', 'GoldDemonNinja', 'Bat', 'BigDemon', 'Dracula'] as const;
+export const CHARACTERS = ['Mina', 'GenericNinja', 'DemonNinja', 'GoldDemonNinja', 'Bat', 'BigDemon', 'Dracula', 'XaHero', 'XaBoss'] as const;
 export type CharKey = (typeof CHARACTERS)[number];
 
+/** The XA characters can only be picked in VS (they have no place in the story co-op). */
+export const VS_ONLY: readonly CharKey[] = ['XaHero', 'XaBoss'];
+
+/** Power-ups the room's host can switch on or off. `heart` (revive a fallen friend) only exists in co-op. */
+export const ITEM_TYPES = ['star', 'heart', 'bolt', 'shield', 'fist', 'fang'] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+export interface Settings { powerups: boolean; items: ItemType[]; lives: number }
+
+export function defaultSettings(mode: 'coop' | 'vs'): Settings {
+  return { powerups: true, items: ITEM_TYPES.filter((i) => mode === 'coop' || i !== 'heart'), lives: 3 };
+}
+/** Keeps only valid items, in a fixed order, with no heart in VS. */
+export function cleanSettings(mode: 'coop' | 'vs', s: { powerups: boolean; items: string[]; lives: number }): Settings {
+  const items = ITEM_TYPES.filter((i) => s.items.includes(i) && (mode === 'coop' || i !== 'heart'));
+  return { powerups: !!s.powerups, items, lives: Math.max(1, Math.min(3, Math.floor(s.lives))) };
+}
+
+/** How many colour variants each character has (the palettes of its sprite sheet, at most 4). Nobody else in the room can have the same one. */
+export const VARIANTS: Record<CharKey, number> = {
+  Mina: 4, GenericNinja: 4, DemonNinja: 3, GoldDemonNinja: 4, Bat: 4, BigDemon: 3, Dracula: 3, XaHero: 1, XaBoss: 1,
+};
+
 export const THREAT: Record<CharKey, number> = {
+  XaHero: 0,
+  XaBoss: 0,
   Mina: 0,
   GenericNinja: 0,
   Bat: -0.02,

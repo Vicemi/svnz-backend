@@ -7,9 +7,11 @@ import { Rooms } from './rooms.js';
 import { attachWebSocket } from './ws.js';
 
 const rooms = new Rooms();
-const app = buildHttp(buildApi(rooms));
+const runtime = { connections: () => 0, startedAt: Date.now() };
+const app = buildHttp(buildApi(rooms, runtime));
 const server = createServer(app);
 const sockets = attachWebSocket(server, rooms);
+runtime.connections = sockets.connections;
 
 server.listen(config.port, config.host, () => {
   log.info(`svnz-backend listening on http://${config.host}:${config.port} (ws path /ws)`);

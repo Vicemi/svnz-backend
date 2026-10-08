@@ -26,15 +26,21 @@ function list(name: string, def: string): string[] {
   return str(name, def).split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-const token = str('GAME_TOKEN');
+// One token, or several separated by commas (rotate the token without downtime: add the new one, update the frontend, drop the old one).
+const tokens = list('GAME_TOKEN', '');
+if (tokens.length === 0) throw new Error('Missing environment variable GAME_TOKEN (see .env.example)');
 // The token travels as a WebSocket sub-protocol, so it can only use "token" characters.
-if (!/^[A-Za-z0-9._-]{16,128}$/.test(token)) throw new Error('GAME_TOKEN must be 16-128 characters of A-Z a-z 0-9 . _ - (run `npm run token` to make one)');
+for (const t of tokens) if (!/^[A-Za-z0-9._-]{16,128}$/.test(t)) throw new Error('GAME_TOKEN must be 16-128 characters of A-Z a-z 0-9 . _ - (run `npm run token` to make one)');
+const adminToken = str('ADMIN_TOKEN', '');
+if (adminToken && !/^[A-Za-z0-9._-]{16,128}$/.test(adminToken)) throw new Error('ADMIN_TOKEN must be 16-128 characters of A-Z a-z 0-9 . _ -');
 
 export const config = {
   port: int('PORT', 8787, 1, 65535),
   host: str('HOST', '0.0.0.0'),
-  /** Shared secret the frontend sends (PUBLIC_SVNZ_BACKEND_TOKEN). */
-  token,
+  /** Shared secret(s) the frontend sends (PUBLIC_SVNZ_BACKEND_TOKEN). */
+  tokens,
+  /** Optional: enables GET /api/admin/stats (header x-admin-token). Empty = disabled. */
+  adminToken,
   /** Browser origins allowed to call the API / open the socket. `*` = any (development only). */
   allowedOrigins: list('ALLOWED_ORIGINS', '*'),
   /** Express "trust proxy" (number of proxies in front of the server, or true/false). Behind a Cloudflare Tunnel use 1. */
@@ -49,9 +55,20 @@ export const config = {
   maxRooms: int('MAX_ROOMS', 200, 1, 100000),
   roomIdleMinutes: int('ROOM_IDLE_MINUTES', 30, 1, 1440),
   maxCoopPlayers: int('MAX_COOP_PLAYERS', 4, 2, 4),
-  /** VS: players per team x 2 (4 vs 4 = 8). */
-  maxVsPlayers: int('MAX_VS_PLAYERS', 8, 2, 8),
+  /** VS is a free-for-all: everybody fights everybody (1v1, 1v1v1, 1v1v1v1). */
+  maxVsPlayers: int('MAX_VS_PLAYERS', 4, 2, 4),
   maxConnectionsPerIp: int('MAX_CONNECTIONS_PER_IP', 8, 1, 100),
+  /** Rooms one address can have open at the same time. */
+  maxRoomsPerIp: int('MAX_ROOMS_PER_IP', 3, 1, 1000),
+  /** Seconds a player who lost the connection (reload, network blip) keeps the seat. */
+  reconnectGraceSeconds: int('RECONNECT_GRACE_SECONDS', 45, 5, 600),
+  /** Seconds a match waits for a host that lost the connection before it is ended for everybody. */
+  hostPlayGraceSeconds: int('HOST_PLAY_GRACE_SECONDS', 12, 3, 120),
+  /** Failed room lookups / resumes from one address before it is blocked (stops room-code guessing). */
+  joinFailLimit: int('JOIN_FAIL_LIMIT', 12, 3, 1000),
+  joinBlockMinutes: int('JOIN_BLOCK_MINUTES', 5, 1, 1440),
+  /** Messages a client may send that do not pass validation before the socket is closed. */
+  maxStrikes: int('MAX_STRIKES', 5, 1, 100),
   httpRatePerMinute: int('HTTP_RATE_PER_MINUTE', 60, 1, 10000),
   createRoomPerMinute: int('CREATE_ROOM_PER_MINUTE', 6, 1, 1000),
   /** Per-connection messages per second (the game sends about 30 a second while playing). */
