@@ -81,7 +81,9 @@ export function attachWebSocket(server: HttpServer, rooms: Rooms): { close(): vo
       }
       handle(c, m);
     });
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
+      // abnormal closes the server itself causes (message too big, rate limit, invalid messages): useful to know when somebody reports trouble
+      if ([1009, 4003, 4008].includes(code)) log.warn(`socket closed by the server: ${code} ${String(reason)} (player ${c.player?.name ?? '-'}, room ${c.room?.code ?? '-'})`);
       clearTimeout(joinTimer);
       conns.delete(c);
       const n = (perIp.get(ip) ?? 1) - 1;
