@@ -24,6 +24,8 @@ export const ClientMessage = t.Union([
   t.Object({ t: t.Literal('ready'), ready: t.Boolean() }),
   t.Object({ t: t.Literal('mode'), mode: Mode }),
   t.Object({ t: t.Literal('start') }),
+  // WebRTC signalling between the host and a guest (offer / answer / ICE candidate); the server only forwards it
+  t.Object({ t: t.Literal('rtc'), to: t.Integer({ minimum: 0, maximum: 7 }), d: t.Object({ k: t.Union([t.Literal('offer'), t.Literal('answer'), t.Literal('ice')]), s: t.Optional(t.String({ maxLength: 12000 })), c: t.Optional(t.Any()) }) }),
   t.Object({ t: t.Literal('in'), d: t.Object({ m: PadBits, tp: PadBits }) }),
   t.Object({ t: t.Literal('snap'), d: Blob }),
   t.Object({ t: t.Literal('end'), d: t.Optional(Blob) }),

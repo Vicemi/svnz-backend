@@ -67,6 +67,7 @@ async function main() {
   check((await api('/api/info', { token: OLD_TOKEN })).status === 200, 'a second (old) token is also accepted: tokens can be rotated');
   check((await api('/api/info', { origin: 'https://evil.example' })).status === 403, 'API from another origin -> 403');
   const info = await (await api('/api/info')).json() as any;
+  check(Array.isArray(info.iceServers) && info.iceServers.length >= 1, 'GET /api/info lists the STUN servers for direct connections');
   check(info.characters.length === 9 && info.vsOnly.length === 2 && info.items.length === 6 && info.limits.vs === 4, 'GET /api/info lists 9 characters (2 VS-only), 6 items, 4 VS players');
   check((await api('/api/rooms', { method: 'POST', body: JSON.stringify({ mode: 'nope' }) })).status === 422, 'POST /api/rooms validates the body');
   const created = await room('coop');
@@ -183,6 +184,14 @@ async function main() {
   g2.c.send({ t: 'snap', d: { evil: true } });
   await sleep(150);
   check(!host.inbox.some((m) => m.t === 'snap'), 'a guest cannot send snapshots');
+  g2.c.send({ t: 'rtc', to: 0, d: { k: 'offer', s: 'v=0 fake sdp' } });
+  const rtc1 = await host.wait('rtc');
+  host.send({ t: 'rtc', to: 1, d: { k: 'answer', s: 'v=0 fake answer' } });
+  const rtc2 = await g2.c.wait('rtc');
+  check(rtc1.from === 1 && rtc1.d.k === 'offer' && rtc2.from === 0 && rtc2.d.k === 'answer', 'WebRTC signalling is forwarded between host and guest');
+  g2.c.send({ t: 'rtc', to: 1, d: { k: 'ice', c: { candidate: 'x' } } });
+  await sleep(120);
+  check(!g2.c.has('rtc'), 'a guest cannot signal to itself / to other guests');
   const late = new Client(); await late.ready();
   late.send({ t: 'join', code: created.code, name: 'Late' });
   check((await late.wait('error')).code === 'started', 'nobody new can join a match in progress');
